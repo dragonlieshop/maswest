@@ -89,6 +89,48 @@
             #monthly-report-content { box-shadow:none !important; border:none !important; max-width:none !important; }
             .report-preview { color:#111 !important; }
         }
+
+        /* Spreadsheet Sync Progress Modal */
+        .sync-progress-overlay {
+            position: fixed; inset: 0; z-index: 200;
+            background: rgba(0,0,0,.78);
+            backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .sync-progress-card {
+            width: min(430px, 100%);
+            background: #18181b;
+            border: 1px solid #3f3f46;
+            border-radius: 18px;
+            padding: 26px;
+            box-shadow: 0 25px 70px rgba(0,0,0,.55);
+        }
+        .sync-progress-icon {
+            width: 58px; height: 58px; border-radius: 50%;
+            display:flex; align-items:center; justify-content:center;
+            margin: 0 auto 14px;
+            background: rgba(220,38,38,.12);
+            color:#ef4444; font-size:25px;
+            border:1px solid rgba(239,68,68,.25);
+        }
+        .sync-progress-track {
+            height: 9px; background:#27272a; border-radius:999px;
+            overflow:hidden; margin-top:18px;
+        }
+        .sync-progress-bar {
+            height:100%; width:0%; border-radius:999px;
+            background: linear-gradient(90deg,#dc2626,#f87171);
+            transition: width .35s ease;
+        }
+        .sync-progress-step {
+            display:flex; align-items:center; gap:10px;
+            color:#a1a1aa; font-size:12px; margin-top:10px;
+        }
+        .sync-progress-step.active { color:#f4f4f5; }
+        .sync-progress-step.done { color:#4ade80; }
+        .sync-progress-step i { width:16px; text-align:center; }
+
     </style>
 </head>
 <body class="antialiased overflow-hidden">
@@ -98,6 +140,33 @@
         <i class="fas fa-circle-notch fa-spin text-red-600 text-5xl mb-4"></i>
         <h2 class="text-xl font-bold tracking-wider text-white">DRAGONLIE RACING</h2>
         <p class="text-zinc-500 text-sm mt-2" id="loading-status-text">Memuat Sistem Database...</p>
+    </div>
+
+    <!-- Popup Progres Sinkronisasi Spreadsheet -->
+    <div id="sync-progress-modal" class="hidden sync-progress-overlay">
+        <div class="sync-progress-card">
+            <div id="sync-progress-icon" class="sync-progress-icon">
+                <i class="fas fa-cloud-arrow-up fa-bounce"></i>
+            </div>
+            <h3 id="sync-progress-title" class="text-lg font-bold text-white text-center">Menyinkronkan Data</h3>
+            <p id="sync-progress-text" class="text-sm text-zinc-400 text-center mt-1">Menyiapkan data...</p>
+
+            <div class="sync-progress-track">
+                <div id="sync-progress-bar" class="sync-progress-bar"></div>
+            </div>
+
+            <div class="mt-4">
+                <div id="sync-step-send" class="sync-progress-step active">
+                    <i class="fas fa-circle-notch fa-spin"></i><span>Mengirim data ke Spreadsheet</span>
+                </div>
+                <div id="sync-step-refresh" class="sync-progress-step">
+                    <i class="far fa-circle"></i><span>Mengambil data terbaru</span>
+                </div>
+                <div id="sync-step-done" class="sync-progress-step">
+                    <i class="far fa-circle"></i><span>Sinkronisasi selesai</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Message Modal -->
@@ -946,8 +1015,105 @@ function createJsonResponse(data){return ContentService.createTextOutput(JSON.st
         /**
          * Mengirimkan request POST ke Google Apps Script Web App
          */
-        async function sendToSpreadsheet(action, payload) {
-            const currentUrl = getScriptUrl();
+        
+        // ===== POPUP PROGRES SINKRONISASI SPREADSHEET =====
+        window.syncProgressActive = false;
+
+        window.showSyncProgress = (stage = 'send', message = '') => {
+            const modal = document.getElementById('sync-progress-modal');
+            if (!modal) return;
+            window.syncProgressActive = true;
+            modal.classList.remove('hidden');
+
+            const title = document.getElementById('sync-progress-title');
+            const text = document.getElementById('sync-progress-text');
+            const bar = document.getElementById('sync-progress-bar');
+            const icon = document.getElementById('sync-progress-icon');
+            const sendStep = document.getElementById('sync-step-send');
+            const refreshStep = document.getElementById('sync-step-refresh');
+            const doneStep = document.getElementById('sync-step-done');
+
+            [sendStep, refreshStep, doneStep].forEach(el => {
+                if (el) el.classList.remove('active','done');
+            });
+
+            if (stage === 'send') {
+                title.innerText = 'Menyimpan & Sinkronisasi';
+                text.innerText = message || 'Mengirim data ke Google Spreadsheet...';
+                bar.style.width = '42%';
+                icon.innerHTML = '<i class="fas fa-cloud-arrow-up fa-bounce"></i>';
+                sendStep.classList.add('active');
+                sendStep.querySelector('i').className = 'fas fa-circle-notch fa-spin';
+                refreshStep.querySelector('i').className = 'far fa-circle';
+                doneStep.querySelector('i').className = 'far fa-circle';
+            } else if (stage === 'refresh') {
+                title.innerText = 'Menyinkronkan Data';
+                text.innerText = message || 'Mengambil data terbaru dari Spreadsheet...';
+                bar.style.width = '78%';
+                icon.innerHTML = '<i class="fas fa-arrows-rotate fa-spin"></i>';
+                sendStep.classList.add('done');
+                sendStep.querySelector('i').className = 'fas fa-check-circle';
+                refreshStep.classList.add('active');
+                refreshStep.querySelector('i').className = 'fas fa-circle-notch fa-spin';
+                doneStep.querySelector('i').className = 'far fa-circle';
+            } else if (stage === 'done') {
+                title.innerText = 'Sinkronisasi Berhasil';
+                text.innerText = message || 'Data sudah tersimpan di Google Spreadsheet.';
+                bar.style.width = '100%';
+                icon.innerHTML = '<i class="fas fa-check"></i>';
+                icon.style.background = 'rgba(34,197,94,.12)';
+                icon.style.color = '#4ade80';
+                icon.style.borderColor = 'rgba(34,197,94,.25)';
+                sendStep.classList.add('done');
+                sendStep.querySelector('i').className = 'fas fa-check-circle';
+                refreshStep.classList.add('done');
+                refreshStep.querySelector('i').className = 'fas fa-check-circle';
+                doneStep.classList.add('done');
+                doneStep.querySelector('i').className = 'fas fa-check-circle';
+            }
+        };
+
+        window.hideSyncProgress = () => {
+            const modal = document.getElementById('sync-progress-modal');
+            if (modal) modal.classList.add('hidden');
+            window.syncProgressActive = false;
+            const icon = document.getElementById('sync-progress-icon');
+            if (icon) {
+                icon.style.background = 'rgba(220,38,38,.12)';
+                icon.style.color = '#ef4444';
+                icon.style.borderColor = 'rgba(239,68,68,.25)';
+            }
+        };
+
+        window.failSyncProgress = (message) => {
+            const modal = document.getElementById('sync-progress-modal');
+            if (!modal) return;
+            const title = document.getElementById('sync-progress-title');
+            const text = document.getElementById('sync-progress-text');
+            const bar = document.getElementById('sync-progress-bar');
+            const icon = document.getElementById('sync-progress-icon');
+            title.innerText = 'Sinkronisasi Gagal';
+            text.innerText = message || 'Data belum berhasil disinkronkan.';
+            bar.style.width = '100%';
+            bar.style.background = '#dc2626';
+            icon.innerHTML = '<i class="fas fa-triangle-exclamation"></i>';
+            icon.style.background = 'rgba(220,38,38,.12)';
+            icon.style.color = '#f87171';
+            icon.style.borderColor = 'rgba(239,68,68,.25)';
+            const failSendIcon = document.getElementById('sync-step-send')?.querySelector('i');
+            const failRefreshIcon = document.getElementById('sync-step-refresh')?.querySelector('i');
+            if (failSendIcon) failSendIcon.className = 'fas fa-circle-xmark';
+            if (failRefreshIcon) failRefreshIcon.className = 'fas fa-circle-xmark';
+            window.syncProgressActive = false;
+            setTimeout(() => {
+                window.hideSyncProgress();
+                if (bar) bar.style.background = 'linear-gradient(90deg,#dc2626,#f87171)';
+            }, 1200);
+        };
+
+async function sendToSpreadsheet(action, payload) {
+                        window.showSyncProgress('send', 'Mengirim data ke Google Spreadsheet...');
+const currentUrl = getScriptUrl();
             if (currentUrl.includes('/library/d/')) {
                 throw new Error('URL yang digunakan adalah Library URL. Gunakan Web App Executable URL (/exec).');
             }
@@ -989,6 +1155,7 @@ function createJsonResponse(data){return ContentService.createTextOutput(JSON.st
 
                 return result;
             } catch (err) {
+                if (window.syncProgressActive) window.failSyncProgress(err.message);
                 console.error('Error sendToSpreadsheet:', err);
                 throw err;
             }
@@ -998,6 +1165,10 @@ function createJsonResponse(data){return ContentService.createTextOutput(JSON.st
          * Mengambil data terbaru dari Google Spreadsheet
          */
         async function syncDataFromSpreadsheet(showFeedback = false) {
+            if (window.syncProgressActive) {
+                window.showSyncProgress('refresh', 'Data tersimpan. Memuat data terbaru dari Spreadsheet...');
+            }
+
             const adminIcon = document.getElementById('admin-refresh-icon');
             const posIcon = document.getElementById('pos-refresh-icon');
             if (adminIcon) adminIcon.classList.add('fa-spin');
@@ -1057,6 +1228,12 @@ function createJsonResponse(data){return ContentService.createTextOutput(JSON.st
                 if (showFeedback) {
                     window.showModalMessage('Sinkronisasi Berhasil', 'Data terbaru dari Google Spreadsheet berhasil dimuat.');
                 }
+            if (window.sync
+                if (window.syncProgressActive) window.failSyncProgress(err.message);
+ProgressActive) {
+                window.showSyncProgress('done', 'Data berhasil disimpan dan disinkronkan ke Spreadsheet.');
+                setTimeout(() => window.hideSyncProgress(), 900);
+            }
             } catch (err) {
                 console.warn('Spreadsheet sync error:', err.message);
                 window.appData.isConnected = false;
